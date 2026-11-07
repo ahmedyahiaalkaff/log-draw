@@ -11,5 +11,9 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "demo.ts", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "examples/typescript_example/demo.ts",
+    "vite.config.ts"
+  ]
 }

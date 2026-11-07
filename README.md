@@ -5,7 +5,7 @@ A browser library for drawing composite wireline logs as SVG.
 ## Install
 
 ```sh
-npm install log-draw
+npm install git branch -M main
 ```
 
 ## Usage
@@ -108,7 +108,8 @@ npm run build
 npm run check
 ```
 
-`npm run dev` serves the demo with Vite, which resolves npm imports such as
-`las-js`; the demo's sample LAS and JSON files are in `data/`. The TypeScript
-library source is in `src/`. `npm run build` creates the distributable
-JavaScript library and TypeScript declarations in `dist/`.
+`npm run dev` serves and opens the TypeScript demo at
+`examples/typescript_example/` with Vite, which resolves npm imports such as
+`las-js`. Its sample LAS and JSON files are in `data/`. The TypeScript library
+source is in `src/`. `npm run build` creates the distributable JavaScript
+library and TypeScript declarations in `dist/`.

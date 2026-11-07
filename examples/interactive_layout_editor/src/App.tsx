@@ -5,7 +5,7 @@ import {
   type LogConfig,
   type LogData,
   type TrackConfig,
-} from "../../src/log_draw";
+} from "../../../src/log_draw";
 
 const sampleCount = 61;
 const wellName = "Well123";

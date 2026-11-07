@@ -1,4 +1,4 @@
-import { CompositeLog, type LogData, type LayoutConfig } from "./src/log_draw";
+import { CompositeLog, type LogData, type LayoutConfig } from "../../src/log_draw";
 import { Las } from "las-js";
 
 function isLogData(value: unknown): value is LogData {
@@ -15,7 +15,7 @@ function isLogData(value: unknown): value is LogData {
   );
 }
 
-const myLas = new Las("./data/25_5-3.las");
+const myLas = new Las("../../data/25_5-3.las");
 const grData = (await myLas.column("GR")).map(Number);
 const bsData = (await myLas.column("BS")).map(Number);
 const caliData = (await myLas.column("CALI")).map(Number);
@@ -33,7 +33,7 @@ if (!logContainer) {
   throw new Error('Missing element with id "log-container".');
 }
 
-const response = await fetch("./data/gr.json");
+const response = await fetch("../../data/gr.json");
 if (!response.ok) {
   throw new Error(`Failed to load gr.json: ${response.status} ${response.statusText}`);
 }
