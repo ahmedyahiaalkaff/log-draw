@@ -1,0 +1,37 @@
+{
+  "name": "log-draw",
+  "version": "1.0.0",
+  "description": "A browser library for drawing composite wireline logs.",
+  "type": "module",
+  "main": "./dist/log-draw.js",
+  "module": "./dist/log-draw.js",
+  "exports": {
+    ".": {
+      "types": "./dist/types/log_draw.d.ts",
+      "import": "./dist/log-draw.js",
+      "default": "./dist/log-draw.js"
+    }
+  },
+  "types": "./dist/types/log_draw.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "wireline",
+    "well-log",
+    "svg"
+  ],
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "las-js": "^3.4.2",
+    "typescript": "^7.0.2",
+    "vite": "^5.4.21"
+  }
+}
