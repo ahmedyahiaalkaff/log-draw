@@ -95,6 +95,46 @@ Tracks use a linear value scale by default. Set a track's `scale` to
 configured `min` and `max`. Logarithmic ranges must have a positive minimum;
 non-positive sample values are treated as gaps.
 
+Tracks can also fill areas to the left or right of a configured curve. Add
+shading rules to `leftShadings` or `rightShadings` in a `TrackConfig`; `edge`,
+`previous`, and another named log are supported targets. Each rule has its own
+color and opacity:
+
+```ts
+const track = {
+  scale: "linear",
+  width: 220,
+  logs: [
+    { name: "GR", aliases: [], color: "#b45309", weight: 2, min: 0, max: 150, wrap: false },
+    { name: "SP", aliases: [], color: "#2563eb", weight: 2, min: -100, max: 50, wrap: false },
+  ],
+  leftShadings: [
+    {
+      sourceLog: "GR",
+      target: { type: "log", name: "SP" },
+      color: "#22c55e",
+      opacity: 0.3,
+    },
+  ],
+  rightShadings: [
+    {
+      sourceLog: "GR",
+      target: { type: "edge" },
+      color: "#f97316",
+      opacity: 0.2,
+    },
+  ],
+};
+```
+
+For curve-to-curve rules, left shading is drawn only where the target curve is
+left of the source; right shading is drawn only where the target is right of
+the source. `previous` refers to the preceding log in that track's `logs`
+array. Missing curve samples create gaps, and shading is clipped to the track's
+plot area. `LogShading` is exported; `LogTrack.leftShadings` and
+`LogTrack.rightShadings` contain the runtime shading instances built from the
+track configuration.
+
 The package is an ES module and requires a browser environment with the DOM and
 SVG APIs. To add dependencies for development or runtime use, install them with
 npm, for example `npm install <package>`.

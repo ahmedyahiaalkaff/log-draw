@@ -49,6 +49,18 @@ export interface LogData {
   [key: string]: readonly number[];
 }
 
+export type LogShadingTarget =
+  | { type: "edge" }
+  | { type: "previous" }
+  | { type: "log"; name: string };
+
+export interface LogShadingConfig {
+  sourceLog: string;
+  target: LogShadingTarget;
+  color: string;
+  opacity: number;
+}
+
 export interface LogTrackOptions{
   meta?: any;
   header?: any;
@@ -66,6 +78,287 @@ export interface TextConfig {
   font: string;
   font_size: number;
   location: Location;
+}
+
+function mapLogValueToX(
+  value: number,
+  logConfig: LogConfig,
+  scale: TrackConfig["scale"],
+  left: number,
+  width: number,
+): number | null {
+  const { min, max } = logConfig;
+  if (
+    !Number.isFinite(min) ||
+    !Number.isFinite(max) ||
+    max <= min ||
+    (scale === "logarithmic" && min <= 0) ||
+    !Number.isFinite(value) ||
+    value === -999.25 ||
+    (scale === "logarithmic" && value <= 0) ||
+    (!logConfig.wrap && value > max)
+  ) {
+    return null;
+  }
+
+  let normalizedValue: number;
+  if (scale === "logarithmic") {
+    const logMin = Math.log(min);
+    const logRange = Math.log(max) - logMin;
+    const logValue = Math.log(value);
+    const plottedLogValue = logConfig.wrap && value > max
+      ? logMin + ((logValue - logMin) % logRange)
+      : logValue;
+    normalizedValue = (plottedLogValue - logMin) / logRange;
+  } else {
+    const range = max - min;
+    const plottedValue = logConfig.wrap && value > max
+      ? min + ((value - min) % range)
+      : value;
+    normalizedValue = (plottedValue - min) / range;
+  }
+  return left + normalizedValue * width;
+}
+
+let nextLogShadingClipId = 0;
+
+export class LogShading {
+  constructor(
+    readonly config: LogShadingConfig,
+    readonly side: "left" | "right",
+  ) {
+    if (!config || typeof config !== "object") {
+      throw new RangeError("A shading rule must be an object.");
+    }
+    if (side !== "left" && side !== "right") {
+      throw new RangeError(`Unsupported shading side: ${String(side)}`);
+    }
+    if (typeof config.sourceLog !== "string" || !config.sourceLog.trim()) {
+      throw new RangeError("A shading rule must name a source log.");
+    }
+    if (typeof config.color !== "string" || !config.color.trim()) {
+      throw new RangeError("A shading rule must have a color.");
+    }
+    if (
+      !Number.isFinite(config.opacity) ||
+      config.opacity < 0 ||
+      config.opacity > 1
+    ) {
+      throw new RangeError("Shading opacity must be between 0 and 1.");
+    }
+    if (!config.target || typeof config.target !== "object") {
+      throw new RangeError("A shading rule must have a target.");
+    }
+    switch (config.target.type) {
+      case "edge":
+      case "previous":
+        break;
+      case "log":
+        if (
+          typeof config.target.name !== "string" ||
+          !config.target.name.trim()
+        ) {
+          throw new RangeError("A log shading target must name a log.");
+        }
+        break;
+      default:
+        throw new RangeError("Unsupported shading target.");
+    }
+  }
+
+  draw(
+    svg: SVGGElement,
+    trackConfig: TrackConfig,
+    logData: LogData,
+    location: Location,
+    depthPixelsPerUnit: number,
+    trackHeaderHeight: number,
+    minDepth: number,
+    maxDepth: number,
+  ): void {
+    const sourceIndex = trackConfig.logs.findIndex(
+      (log) => String(log.name) === this.config.sourceLog,
+    );
+    if (sourceIndex === -1) {
+      throw new RangeError(
+        `Shading source log "${this.config.sourceLog}" does not exist in this track.`,
+      );
+    }
+
+    let targetConfig: LogConfig | undefined;
+    let targetValues: readonly number[] | undefined;
+    let targetIsEdge = false;
+    const target = this.config.target;
+    if (target.type === "log") {
+      targetConfig = trackConfig.logs.find(
+        (log) => String(log.name) === target.name,
+      );
+      if (!targetConfig || targetConfig === trackConfig.logs[sourceIndex]) {
+        throw new RangeError(
+          `Shading target log "${target.name}" must be a different log in this track.`,
+        );
+      }
+      targetValues = logData[String(targetConfig.name)];
+    } else if (target.type === "previous") {
+      targetConfig = trackConfig.logs[sourceIndex - 1];
+      if (!targetConfig) {
+        return;
+      }
+      targetValues = logData[String(targetConfig.name)];
+    } else {
+      targetIsEdge = true;
+    }
+
+    const sourceConfig = trackConfig.logs[sourceIndex];
+    const sourceValues = logData[this.config.sourceLog];
+    if (!sourceValues) {
+      throw new RangeError(
+        `Shading source log "${this.config.sourceLog}" has no curve data.`,
+      );
+    }
+    if (!targetIsEdge && !targetValues) {
+      throw new RangeError(
+        `Shading target log "${String(targetConfig?.name)}" has no curve data.`,
+      );
+    }
+
+    const depth = logData.depth;
+    const sampleCount = targetIsEdge
+      ? Math.min(depth.length, sourceValues.length)
+      : Math.min(depth.length, sourceValues.length, targetValues!.length);
+    const plotTop =
+      location.top + trackHeaderHeight + LOG_PLOT_TOP_PADDING;
+    const leftEdge = location.left;
+    const rightEdge = location.left + trackConfig.width;
+    const edgeX = this.side === "left" ? leftEdge : rightEdge;
+    const polygons: string[] = [];
+
+    const getSample = (index: number) => {
+      const sampleDepth = depth[index];
+      if (!Number.isFinite(sampleDepth)) {
+        return null;
+      }
+      const sourceX = mapLogValueToX(
+        sourceValues[index],
+        sourceConfig,
+        trackConfig.scale,
+        location.left,
+        trackConfig.width,
+      );
+      const targetX = targetIsEdge
+        ? edgeX
+        : mapLogValueToX(
+            targetValues![index],
+            targetConfig!,
+            trackConfig.scale,
+            location.left,
+            trackConfig.width,
+          );
+      if (sourceX === null || targetX === null) {
+        return null;
+      }
+      return {
+        sourceX,
+        targetX,
+        y: plotTop + (sampleDepth - minDepth) * depthPixelsPerUnit,
+        sourceWasWrapped:
+          sourceConfig.wrap && sourceValues[index] > sourceConfig.max,
+        targetWasWrapped:
+          !targetIsEdge &&
+          targetConfig!.wrap &&
+          targetValues![index] > targetConfig!.max,
+      };
+    };
+
+    for (let index = 0; index < sampleCount - 1; index++) {
+      const start = getSample(index);
+      const end = getSample(index + 1);
+      if (
+        !start ||
+        !end ||
+        start.sourceWasWrapped !== end.sourceWasWrapped ||
+        start.targetWasWrapped !== end.targetWasWrapped
+      ) {
+        continue;
+      }
+
+      const startDistance = this.side === "left"
+        ? start.sourceX - start.targetX
+        : start.targetX - start.sourceX;
+      const endDistance = this.side === "left"
+        ? end.sourceX - end.targetX
+        : end.targetX - end.sourceX;
+      if (startDistance <= 0 && endDistance <= 0) {
+        continue;
+      }
+
+      let startPoint = start;
+      let endPoint = end;
+      if ((startDistance > 0) !== (endDistance > 0)) {
+        const fraction =
+          startDistance / (startDistance - endDistance);
+        const crossingY = start.y + (end.y - start.y) * fraction;
+        const crossingX =
+          start.sourceX + (end.sourceX - start.sourceX) * fraction;
+        const crossing = {
+          sourceX: crossingX,
+          targetX: crossingX,
+          y: crossingY,
+          sourceWasWrapped: start.sourceWasWrapped,
+          targetWasWrapped: start.targetWasWrapped,
+        };
+        if (startDistance <= 0) {
+          startPoint = crossing;
+        } else {
+          endPoint = crossing;
+        }
+      }
+
+      polygons.push(
+        `M ${startPoint.sourceX} ${startPoint.y} ` +
+          `L ${endPoint.sourceX} ${endPoint.y} ` +
+          `L ${endPoint.targetX} ${endPoint.y} ` +
+          `L ${startPoint.targetX} ${startPoint.y} Z`,
+      );
+    }
+
+    if (polygons.length === 0) {
+      return;
+    }
+
+    const clipId = `log-shading-clip-${nextLogShadingClipId++}`;
+    const defs = document.createElementNS(SVG_NAMESPACE, "defs");
+    const clipPath = document.createElementNS(SVG_NAMESPACE, "clipPath");
+    clipPath.setAttribute("id", clipId);
+    clipPath.setAttribute("clipPathUnits", "userSpaceOnUse");
+    const clipRect = document.createElementNS(SVG_NAMESPACE, "rect");
+    clipRect.setAttribute("x", leftEdge.toString());
+    clipRect.setAttribute("y", plotTop.toString());
+    clipRect.setAttribute("width", trackConfig.width.toString());
+    clipRect.setAttribute(
+      "height",
+      ((maxDepth - minDepth) * depthPixelsPerUnit).toString(),
+    );
+    clipPath.appendChild(clipRect);
+    defs.appendChild(clipPath);
+    svg.appendChild(defs);
+
+    const path = document.createElementNS(SVG_NAMESPACE, "path");
+    path.setAttribute("class", `log-shading-area log-shading-${this.side}`);
+    path.setAttribute("data-shading-side", this.side);
+    path.setAttribute("data-shading-source", this.config.sourceLog);
+    path.setAttribute("data-shading-target", this.config.target.type);
+    if (this.config.target.type === "log") {
+      path.setAttribute("data-shading-target-log", this.config.target.name);
+    }
+    path.setAttribute("fill", this.config.color);
+    path.setAttribute("fill-opacity", this.config.opacity.toString());
+    path.setAttribute("stroke", "none");
+    path.setAttribute("pointer-events", "none");
+    path.setAttribute("clip-path", `url(#${clipId})`);
+    path.setAttribute("d", polygons.join(" "));
+    svg.appendChild(path);
+  }
 }
 
 export class Log {
@@ -190,25 +483,18 @@ export class Log {
         startSegment = true;
       }
 
-      const maxX = left+this.trackWidth;
-      const minX = left;
-      let normalizedValue: number;
-      if (this.scale === "logarithmic") {
-        const logMin = Math.log(min);
-        const logRange = Math.log(max) - logMin;
-        const logValue = Math.log(value);
-        const plottedLogValue = valueWasWrapped
-          ? logMin + ((logValue - logMin) % logRange)
-          : logValue;
-        normalizedValue = (plottedLogValue - logMin) / logRange;
-      } else {
-        const range = max - min;
-        const plottedValue = valueWasWrapped
-          ? min + ((value - min) % range)
-          : value;
-        normalizedValue = (plottedValue - min) / range;
+      const x = mapLogValueToX(
+        value,
+        this.logConfig,
+        this.scale,
+        left,
+        this.trackWidth,
+      );
+      if (x === null) {
+        startSegment = true;
+        previousValueWasWrapped = false;
+        continue;
       }
-      const x = minX + normalizedValue * (maxX - minX);
       const y = top + LOG_PLOT_TOP_PADDING + (depth[i] - minDepth) * this.depthPixelsPerUnit;
       xarray.push(x);
       path.push(`${startSegment ? "M" : "L"} ${x} ${y}`);
@@ -405,6 +691,8 @@ export class DepthTrack {
 export class LogTrack {
   private readonly svg:SVGSVGElement;
   private readonly  logs: Log[] = [];
+  readonly leftShadings: LogShading[];
+  readonly rightShadings: LogShading[];
   private readonly location: Location;
   private readonly trackConfig: TrackConfig;
   private readonly logData: LogData;
@@ -436,6 +724,12 @@ export class LogTrack {
     this.depthPixelsPerUnit = depthPixelsPerUnit;
     this.minDepth = minDepth;
     this.maxDepth = maxDepth;
+    this.leftShadings = (trackConfig.leftShadings ?? []).map(
+      (config) => new LogShading(config, "left"),
+    );
+    this.rightShadings = (trackConfig.rightShadings ?? []).map(
+      (config) => new LogShading(config, "right"),
+    );
     this.trackSVGGroup = document.createElementNS(SVG_NAMESPACE, "g");
     this.trackSVGGroup.setAttribute("data-track-index", trackIndex.toString());
     this.trackSVGGroup.setAttribute("data-layout-action", "reorder-track");
@@ -480,6 +774,30 @@ export class LogTrack {
     if (this.trackConfig.showGrid) {
       this.drawGrid();
     }
+    this.leftShadings.forEach((shading) =>
+      shading.draw(
+        this.trackSVGGroup,
+        this.trackConfig,
+        this.logData,
+        this.location,
+        this.depthPixelsPerUnit,
+        this.trackHeaderHeight,
+        this.minDepth,
+        this.maxDepth,
+      ),
+    );
+    this.rightShadings.forEach((shading) =>
+      shading.draw(
+        this.trackSVGGroup,
+        this.trackConfig,
+        this.logData,
+        this.location,
+        this.depthPixelsPerUnit,
+        this.trackHeaderHeight,
+        this.minDepth,
+        this.maxDepth,
+      ),
+    );
     this.logTrackHeader.draw();
     this.logs.forEach((log) => log.draw());
   }
@@ -871,6 +1189,8 @@ export interface TrackConfig {
   scale: "linear" | "logarithmic";
   width: number;
   showGrid?: boolean;
+  leftShadings?: LogShadingConfig[];
+  rightShadings?: LogShadingConfig[];
 }
 
 export interface LayoutConfig {

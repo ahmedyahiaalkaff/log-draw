@@ -28,6 +28,11 @@ uses the same confirmation.
 Select a curve in the preview to highlight its matching log editor. Log curves
 can also be selected with Enter or Space when focused.
 
+Add left or right shading from a log's settings. A shading rule can fill toward
+the corresponding track edge, the previous log in the track, or another log.
+Curve-to-curve shading only appears on the requested side of the source curve.
+Color and opacity are set per rule.
+
 For logarithmic track scale, set each log's minimum to a positive value.
 Non-positive samples are omitted from the curve.
 

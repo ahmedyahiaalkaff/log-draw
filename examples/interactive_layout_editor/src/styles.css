@@ -285,6 +285,76 @@ h1 {
   gap: 9px 10px;
 }
 
+.log-shading-editors {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.shading-settings {
+  padding: 9px;
+  border: 1px solid #e6eaf0;
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.shading-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.shading-heading h6 {
+  margin: 0;
+  color: #536176;
+  font-size: 0.72rem;
+}
+
+.shading-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(70px, 0.65fr);
+  align-items: end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #edf0f4;
+}
+
+.shading-rule + .shading-rule {
+  margin-top: 8px;
+}
+
+.shading-rule label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: #647084;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.shading-rule input,
+.shading-rule select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 5px 7px;
+  border: 1px solid #d6deea;
+  border-radius: 5px;
+  background: #fff;
+  color: #172033;
+  font-size: 0.76rem;
+}
+
+.shading-rule .color-input {
+  padding: 3px;
+}
+
+.shading-rule > .remove-button {
+  justify-self: start;
+  padding: 4px 0;
+}
+
 .field-grid .color-input {
   height: 36px;
   padding: 3px;

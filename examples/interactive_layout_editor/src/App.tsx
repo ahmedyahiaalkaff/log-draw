@@ -4,6 +4,8 @@ import {
   type LayoutConfig,
   type LogConfig,
   type LogData,
+  type LogShadingConfig,
+  type LogShadingTarget,
   type TrackConfig,
 } from "../../../src/log_draw";
 
@@ -132,6 +134,36 @@ function getLogName(log: LogConfig): string {
   return String(log.name);
 }
 
+type ShadingSide = "left" | "right";
+
+function getShadingKey(side: ShadingSide) {
+  return side === "left" ? "leftShadings" : "rightShadings";
+}
+
+function getShadingTargetValue(target: LogShadingTarget): string {
+  switch (target.type) {
+    case "edge":
+      return "edge";
+    case "previous":
+      return "previous";
+    case "log":
+      return `log:${target.name}`;
+  }
+}
+
+function parseShadingTarget(value: string): LogShadingTarget | null {
+  if (value === "edge") {
+    return { type: "edge" };
+  }
+  if (value === "previous") {
+    return { type: "previous" };
+  }
+  if (value.startsWith("log:")) {
+    return { type: "log", name: value.slice(4) };
+  }
+  return null;
+}
+
 function retainLogData(logData: LogData, usedNames: Set<string>): LogData {
   const curves = Object.fromEntries(
     Object.entries(logData).filter(
@@ -177,6 +209,38 @@ function getLayoutError(layout: LayoutConfig): string | null {
       }
       if (!Number.isFinite(log.weight) || log.weight <= 0) {
         return `${getLogName(log)} line weight must be greater than zero.`;
+      }
+    }
+    const logNames = track.logs.map(getLogName);
+    for (const [side, shadings] of [
+      ["left", track.leftShadings ?? []],
+      ["right", track.rightShadings ?? []],
+    ] as const) {
+      for (const shading of shadings) {
+        const sourceIndex = logNames.indexOf(shading.sourceLog);
+        if (sourceIndex === -1) {
+          return `Track ${trackIndex + 1} ${side} shading refers to a missing source log.`;
+        }
+        if (
+          shading.target.type === "log" &&
+          (!logNames.includes(shading.target.name) ||
+            shading.target.name === shading.sourceLog)
+        ) {
+          return `Track ${trackIndex + 1} ${side} shading must target a different log in the same track.`;
+        }
+        if (shading.target.type === "previous" && sourceIndex === 0) {
+          return `Track ${trackIndex + 1} ${side} shading needs a previous log.`;
+        }
+        if (
+          !Number.isFinite(shading.opacity) ||
+          shading.opacity < 0 ||
+          shading.opacity > 1
+        ) {
+          return `Track ${trackIndex + 1} ${side} shading opacity must be between 0 and 1.`;
+        }
+        if (typeof shading.color !== "string" || !shading.color.trim()) {
+          return `Track ${trackIndex + 1} ${side} shading needs a color.`;
+        }
       }
     }
   }
@@ -849,6 +913,26 @@ function App() {
               logs: track.logs.map((log, currentLogIndex) =>
                 currentLogIndex === logIndex ? nextLog : log,
               ),
+              leftShadings: track.leftShadings?.map((shading) => ({
+                ...shading,
+                sourceLog:
+                  shading.sourceLog === oldName ? newName : shading.sourceLog,
+                target:
+                  shading.target.type === "log" &&
+                  shading.target.name === oldName
+                    ? { ...shading.target, name: newName }
+                    : shading.target,
+              })),
+              rightShadings: track.rightShadings?.map((shading) => ({
+                ...shading,
+                sourceLog:
+                  shading.sourceLog === oldName ? newName : shading.sourceLog,
+                target:
+                  shading.target.type === "log" &&
+                  shading.target.name === oldName
+                    ? { ...shading.target, name: newName }
+                    : shading.target,
+              })),
             }
           : track,
       );
@@ -863,6 +947,60 @@ function App() {
         logData,
       };
     });
+  }
+
+  function addShading(trackIndex: number, logIndex: number, side: ShadingSide) {
+    const log = editor.layout.tracks[trackIndex]?.logs[logIndex];
+    if (!log) {
+      return;
+    }
+    const key = getShadingKey(side);
+    const shading: LogShadingConfig = {
+      sourceLog: getLogName(log),
+      target: { type: "edge" },
+      color: String(log.color),
+      opacity: 0.25,
+    };
+    const track = editor.layout.tracks[trackIndex];
+    updateTrack(trackIndex, {
+      [key]: [...(track[key] ?? []), shading],
+    });
+    setEditError(null);
+  }
+
+  function updateShading(
+    trackIndex: number,
+    side: ShadingSide,
+    shadingIndex: number,
+    patch: Partial<LogShadingConfig>,
+  ) {
+    const key = getShadingKey(side);
+    const track = editor.layout.tracks[trackIndex];
+    if (!track?.[key]?.[shadingIndex]) {
+      return;
+    }
+    updateTrack(trackIndex, {
+      [key]: track[key]!.map((shading, index) =>
+        index === shadingIndex ? { ...shading, ...patch } : shading,
+      ),
+    });
+    setEditError(null);
+  }
+
+  function removeShading(
+    trackIndex: number,
+    side: ShadingSide,
+    shadingIndex: number,
+  ) {
+    const key = getShadingKey(side);
+    const track = editor.layout.tracks[trackIndex];
+    if (!track?.[key]?.[shadingIndex]) {
+      return;
+    }
+    updateTrack(trackIndex, {
+      [key]: track[key]!.filter((_, index) => index !== shadingIndex),
+    });
+    setEditError(null);
   }
 
   function addTrack() {
@@ -1009,6 +1147,22 @@ function App() {
           ? {
               ...track,
               logs: track.logs.filter((_, currentIndex) => currentIndex !== logIndex),
+              leftShadings: track.leftShadings?.filter(
+                (shading) =>
+                  shading.sourceLog !== getLogName(removedLog) &&
+                  !(
+                    shading.target.type === "log" &&
+                    shading.target.name === getLogName(removedLog)
+                  ),
+              ),
+              rightShadings: track.rightShadings?.filter(
+                (shading) =>
+                  shading.sourceLog !== getLogName(removedLog) &&
+                  !(
+                    shading.target.type === "log" &&
+                    shading.target.name === getLogName(removedLog)
+                  ),
+              ),
             }
           : track,
       );
@@ -1054,6 +1208,111 @@ function App() {
     }
     setSelectedTrackIndex(trackIndex);
     setSelectedLogName(logName);
+  }
+
+  function renderShadingEditor(
+    track: TrackConfig,
+    trackIndex: number,
+    log: LogConfig,
+    logIndex: number,
+    side: ShadingSide,
+  ) {
+    const key = getShadingKey(side);
+    const sourceLog = getLogName(log);
+    const shadings = (track[key] ?? [])
+      .map((shading, shadingIndex) => ({ shading, shadingIndex }))
+      .filter(({ shading }) => shading.sourceLog === sourceLog);
+
+    return (
+      <section
+        className="shading-settings"
+        aria-label={`${side} shading for ${sourceLog}`}
+      >
+        <div className="shading-heading">
+          <h6>{side === "left" ? "Left shading" : "Right shading"}</h6>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => addShading(trackIndex, logIndex, side)}
+          >
+            + Add
+          </button>
+        </div>
+        {shadings.map(({ shading, shadingIndex }) => (
+          <div className="shading-rule" key={shadingIndex}>
+            <label>
+              Fill to
+              <select
+                aria-label={`${side} shading target for ${sourceLog}`}
+                value={getShadingTargetValue(shading.target)}
+                onChange={(event) => {
+                  const target = parseShadingTarget(event.target.value);
+                  if (target) {
+                    updateShading(trackIndex, side, shadingIndex, { target });
+                  }
+                }}
+              >
+                <option value="edge">
+                  {side === "left" ? "Left track edge" : "Right track edge"}
+                </option>
+                <option value="previous" disabled={logIndex === 0}>
+                  Previous log
+                </option>
+                {track.logs.map((candidate) => (
+                  <option
+                    key={getLogName(candidate)}
+                    value={`log:${getLogName(candidate)}`}
+                    disabled={getLogName(candidate) === sourceLog}
+                  >
+                    {getLogName(candidate)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Shading color
+              <input
+                className="color-input"
+                type="color"
+                aria-label={`${side} shading color for ${sourceLog}`}
+                value={shading.color}
+                onChange={(event) =>
+                  updateShading(trackIndex, side, shadingIndex, {
+                    color: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label>
+              Opacity
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                aria-label={`${side} shading opacity for ${sourceLog}`}
+                value={shading.opacity}
+                onChange={(event) =>
+                  updateShading(trackIndex, side, shadingIndex, {
+                    opacity: Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <button
+              className="text-button remove-button"
+              type="button"
+              aria-label={`Remove ${side} shading for ${sourceLog}`}
+              onClick={() =>
+                removeShading(trackIndex, side, shadingIndex)
+              }
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </section>
+    );
   }
 
   return (
@@ -1440,6 +1699,22 @@ function App() {
                         />
                         Wrap values above maximum
                       </label>
+                    </div>
+                    <div className="log-shading-editors">
+                      {renderShadingEditor(
+                        track,
+                        trackIndex,
+                        log,
+                        logIndex,
+                        "left",
+                      )}
+                      {renderShadingEditor(
+                        track,
+                        trackIndex,
+                        log,
+                        logIndex,
+                        "right",
+                      )}
                     </div>
                   </div>
                 ))}
